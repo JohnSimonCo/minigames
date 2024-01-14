@@ -1,0 +1,514 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Sim</title>
+	
+	<!--<script src="https://unpkg.com/taichi.js/dist/taichi.umd.js"></script>-->
+
+	<style type="text/css">
+
+		body {
+			margin: 0;
+			padding: 0;
+			font-family: monospace;
+			font-size: 20px;
+		}
+		
+		#main-canvas {
+			border: 1px solid black;
+			float: left;
+			margin-right: 20px;
+		}
+
+		#container {
+			width: 1300px;
+			margin: auto;
+		}
+	
+		#controls {
+			padding-top: 16px;
+		}
+
+		.panel {
+			padding-top: 5px;
+			padding-bottom: 5px; 
+		}
+
+		button {
+			padding: 6px;
+			font-family: monospace;
+			font-size: 20px;
+			background: #aaa;
+			margin-top: 5px;
+			margin-bottom: 5px;
+			border: none;
+		}
+
+		button:hover {
+			background: #bbb;
+		}
+
+		.header {
+			font-weight: bold;
+		}
+
+		.gpu {
+			display: none;
+		}
+
+	</style>
+
+</head>
+<body>
+<div id="container">
+
+	<canvas id="main-canvas" width="900px" height="900px"></canvas>
+
+	<div id="controls">
+
+		<div class="panel gpu">
+			<div>GPU acceleration:</div>
+
+			<input type="checkbox" value="1" id="gpu-acc" onclick="updateGPUacc()">
+		</div>
+
+		<div class="panel">
+			<div>Jumps:</div>
+
+			<input type="range" min="1" max="100" value="1" id="rangejumps">
+		</div>
+			
+		<div class="panel">
+			<div>Δt:</div>
+
+			<input type="range" min="1" max="50" value="1" id="rangedt">
+
+		</div>
+		
+		<div class="panel">
+			<div>Frames:</div>
+			<div id="counter"></div>
+		</div>
+
+		<div class="panel">
+			<div>Averge speed:</div>
+			<div id="speed"></div>
+		</div>
+		
+		<div class="panel">
+			<button onclick="pot = 0">Ginibre</button>
+			<button onclick="pot = 1">Mittag-Leffler λ=2</button>
+			<button onclick="pot = 2">Mittag-Leffler λ=10</button>
+			<button onclick="pot = 3">Lem k=2</button>
+			<button onclick="pot = 4">Lem k=3</button>
+			<button onclick="pot = 5">Lem k=5</button>
+			<button onclick="pot = 6">Lem interpo</button>
+		</div>
+
+		<div class="panel">
+			<div class="header">Lemniscate critical scaling:</div>
+			<span>Critical scaling:</span>
+			<input type="range" min="0" max="100" value="50" id="rangelem">
+			<div></div>
+			<span>Interpolation:</span>
+			<input type="range" min="10" max="50" value="25" id="rangeleminterpol">
+		</div>
+
+		<div class="panel">
+			<div class="header">Inserted scaled settings:</div>
+			<span>ca:</span>
+			<input type="range" min="0" max="100" value="0" id="rangeca">
+			<span>ax:</span>
+			<input type="range" min="-50" max="50" value="0" id="rangeax">
+			<span>ay:</span>
+			<input type="range" min="-50" max="50" value="0" id="rangeay">
+			<span>cb:</span>
+			<input type="range" min="0" max="100" value="0" id="rangecb">
+			<span>bx:</span>
+			<input type="range" min="-50" max="50" value="0" id="rangebx">
+			<span>by:</span>
+			<input type="range" min="-50" max="50" value="0" id="rangeby">
+		</div>
+		
+		<div class="panel">
+			<div class="header">Particles:</div>
+			<button onclick="n=1;reset()">n=1</button>
+			<button onclick="n=2;reset()">n=2</button>
+			<button onclick="n=10;reset()">n=10</button>
+			<button onclick="n=50;reset()">n=50</button>
+			<button onclick="n=100;reset()">n=100</button>
+			<button onclick="n=200;reset()">n=200</button>
+			<button onclick="n=500;reset()">n=500</button>
+			<button onclick="n=1000;reset()">n=1000</button>
+			<button onclick="n=2000;reset()">n=2000</button>
+			<button onclick="n=5000;reset()">n=5000</button>
+			<button onclick="n=10000;reset();particleSize=1;">n=10000</button>
+			<button onclick="n=20000;reset();particleSize=1;">n=20000</button>
+			<button onclick="n=50000;reset();particleSize=1;">n=50000</button>
+
+		</div>
+
+		<div class="panel">
+			<div class="header">Rendering:</div>
+
+			<span>Particles radius:</span>
+			<input type="range" min="1" max="10" value="3" id="rangesize">
+		</div>
+		
+
+	</div>
+
+</div>
+
+
+<script type="text/javascript">
+
+const rangejumps = document.getElementById("rangejumps");
+const rangedt = document.getElementById("rangedt");
+
+const canvas = document.querySelector('#main-canvas')
+const ctx = canvas.getContext('2d')
+
+const width = canvas.width
+const height = canvas.height
+
+const h = 0.0001
+let n = 5000;
+
+let oldPot;
+let oldInt;
+let newPot;
+let newInt;
+
+let counter;
+let particles;
+let particlesOld;
+let accs;
+let dt;
+
+let pot = 0;
+
+let ax = 0
+let ay = 0
+let bx = 0
+let by = 0
+let ca = 0
+let cb = 0
+
+let particleSize = 3;
+let renderDensity = false;
+let lemniscateT = 1;
+let maxDensity = 1/8;
+let lemInterpol = 2.5;
+let justReset = false;
+
+const rangelem = document.getElementById("rangelem");
+
+rangelem.oninput = function() {
+	lemniscateT = this.value/50
+}
+
+const rangeleminterpol = document.getElementById("rangeleminterpol");
+
+rangeleminterpol.oninput = function() {
+	lemInterpol = this.value/10
+}
+
+const rangesize = document.getElementById("rangesize");
+
+rangesize.oninput = function() {
+	particleSize = this.value
+}
+
+rangejumps.oninput = function() {
+    steps = this.value;
+}
+
+rangedt.oninput = function() {
+    dt = this.value/3000;
+}
+
+const rangeca = document.getElementById("rangeca");
+const rangeax = document.getElementById("rangeax");
+const rangeay = document.getElementById("rangeay");
+
+const rangecb = document.getElementById("rangecb");
+const rangebx = document.getElementById("rangebx");
+const rangeby = document.getElementById("rangeby");
+
+rangeca.oninput = function() {
+    ca = this.value/100
+}
+rangeax.oninput = function() {
+    ax = this.value/50
+}
+rangeay.oninput = function() {
+    ay = this.value/50
+}
+rangecb.oninput = function() {
+    cb = this.value/100
+}
+rangebx.oninput = function() {
+    bx = this.value/50
+}
+rangeby.oninput = function() {
+    by = this.value/50
+}
+
+function reset() {
+	counter = 0
+
+	particles = []
+	particlesOld = []
+	accs = []
+
+	steps = rangejumps.value
+	dt = rangedt.value / 1000
+
+	for (let i = 0; i < n; i++) {
+		x = (Math.random()-0.5)*2.7
+		y = (Math.random()-0.5)*2.7
+		particles.push([x, y, 0, 0])
+		particlesOld.push([x, y])
+		accs.push([0,0])
+	}
+
+	// Initialize worker pool
+	if (n < 100) {
+		numberOfWorkers = 1;	
+	} else if (n < 1000) {
+		numberOfWorkers = 4;
+	} else {
+		numberOfWorkers = 8;
+	}
+	workerPool = Array.from({ length: numberOfWorkers }, () => new Worker(workerURL));
+
+	justReset = true;
+}
+
+function particlePositionsToArrayBuffer(particles) {
+    const arr = new Float32Array(particles.length * 2);
+    for (let i = 0; i < n; i++) {
+    	arr[i * 2] = particles[i][0];
+        arr[i * 2 + 1] = particles[i][1];
+    }
+
+    return arr.buffer;
+}
+
+// Create a worker from an inline script using Blob
+const blob = new Blob([
+  `
+self.addEventListener('message', function(e) {
+
+  const i = e.data.index;
+  const particles = new Float32Array(e.data.bufferToSend);
+
+  const n = particles.length/2;
+  const h = e.data.h;
+  const dt = e.data.dt;
+  const pot = e.data.pot;
+  const lemniscateT = e.data.lemniscateT;
+  const lemInterpol = e.data.lemInterpol;
+  const ca = e.data.ca;
+  const cb = e.data.cb;
+  const bx = e.data.bx;
+  const by = e.data.by;
+  const ax = e.data.ax;
+  const ay = e.data.ay;
+
+  function Q(x, y) {
+    let q = 0;
+    let real = x;
+    let imag = y;
+
+    let r = Math.sqrt(real * real + imag * imag);
+    let theta = Math.atan2(imag, real);
+
+    if (pot === 0)
+      q += x * x + y * y;
+    if (pot === 1)
+      q += Math.pow(x * x + y * y, 2);
+    if (pot === 2)
+      q += Math.pow(x * x + y * y, 10);
+    if (pot === 3)
+      q += Math.pow(x * x + y * y, 2) - lemniscateT * 2 / Math.sqrt(2) * Math.pow(r, 2) * Math.cos(2 * theta);
+    if (pot === 4)
+      q += Math.pow(x * x + y * y, 3) - lemniscateT * 2 / Math.sqrt(3) * Math.pow(r, 3) * Math.cos(3 * theta);
+    if (pot === 5)
+      q += Math.pow(x * x + y * y, 3) - lemniscateT * 2 / Math.sqrt(5) * Math.pow(r, 5) * Math.cos(5 * theta);
+    if (pot === 6)
+      q += Math.pow(x * x + y * y, lemInterpol) - lemniscateT * 2 / Math.sqrt(lemInterpol) * Math.pow(r, lemInterpol) * Math.cos(lemInterpol * theta);
+
+    q += (-cb * Math.log(Math.sqrt(Math.pow(x - bx, 2) + Math.pow(y - by, 2))) - ca * Math.log(Math.sqrt(Math.pow(x - ax, 2) + Math.pow(y + ay, 2))));
+
+    return q;
+  }
+
+  //first do the Q derivative numerically (as it is not O(n^2))
+  let acc_x = -n*(Q(particles[i*2+0]+h, particles[i*2+1]) - Q(particles[i*2+0], particles[i*2+1]))/h
+  let acc_y = -n*(Q(particles[i*2+0], particles[i*2+1]+h) - Q(particles[i*2+0], particles[i*2+1]))/h
+
+  /*
+  now for the pairwise interaction, the force should be in the
+  direction of the difference vector between the two particles
+  and be proportional to the derivative of the energy
+  */ 
+
+  for (let j = 0; j < n; j++) {
+    if (j != i) {
+
+      let px = particles[i*2+0]
+      let py = particles[i*2+1]
+      let qx = particles[j*2+0]
+      let qy = particles[j*2+1]
+
+      //This formula was found with Wolfram alpha as the derivative
+      let den = (px*px - 2*px*qx + qx*qx + py*py - 2*py*qy + qy*qy);
+      acc_x -= (2*(qx - px))/den;
+      acc_y -= (2*(qy - py))/den;
+    }
+  }
+
+  self.postMessage({ i, acc_x, acc_y });
+});
+
+`
+], { type: 'application/javascript' });
+
+const workerURL = URL.createObjectURL(blob);
+
+// Initialize worker pool
+let numberOfWorkers = 4;
+let workerPool = Array.from({ length: numberOfWorkers }, () => new Worker(workerURL));
+
+async function step() {
+    const accs = [];
+
+    const tasks = Array.from({ length: n }, (_, index) => index);
+    const chunkSize = Math.ceil(n / numberOfWorkers);
+    const chunks = Array.from({ length: numberOfWorkers }, (_, i) => tasks.slice(i * chunkSize, (i + 1) * chunkSize));
+
+	let messageCounts = [];
+	for (let i = 0; i < numberOfWorkers; i++) {
+		messageCounts.push(0)
+	}
+
+	const bufferToSend = particlePositionsToArrayBuffer(particles);
+
+    const promises = chunks.map((chunk, workerIndex) => {
+        return new Promise((resolve) => {
+            const worker = workerPool[workerIndex];
+            worker.onmessage = function(e) {
+                accs[e.data.i] = [e.data.acc_x, e.data.acc_y];
+                messageCounts[workerIndex]++;
+
+                if (messageCounts[workerIndex] == chunkSize) {
+                	resolve();
+                }
+            };
+
+            chunk.forEach(index => worker.postMessage({index, bufferToSend, h, dt, pot, lemniscateT, lemInterpol, ca, cb, bx, by, ax, ay }));
+        });
+    });
+
+    await Promise.all(promises);
+
+    if (justReset) {
+    	justReset = false;
+    	return;
+    }
+
+	//Verlet integration
+	for (let i = 0; i < n; i++) {
+		let tempPosition = [particles[i][0], particles[i][1]]; // Temporary storage of current position
+
+		// Basic Verlet integration
+		let dx = particles[i][0] - particlesOld[i][0] + accs[i][0] * dt * dt;
+		let dy = particles[i][1] - particlesOld[i][1] + accs[i][1] * dt * dt;
+
+		// Apply heuristic damping to displacement
+		dx *= 0.8;
+		dy *= 0.8;
+
+		// Update positions
+		particles[i][0] += dx;
+		particles[i][1] += dy;
+
+		// Store the current position for the next iteration
+		particlesOld[i] = [tempPosition[0], tempPosition[1]];
+	}
+	
+	//Standard Euler integration
+	/*
+	for (let i = 0; i < n; i++) {
+		particles[i][2] += accs[i][0]*dt;
+		particles[i][3] += accs[i][1]*dt;
+
+		particles[i][0] += particles[i][2]*dt;
+		particles[i][1] += particles[i][3]*dt;
+
+		particles[i][2] *= 0.8;
+		particles[i][3] *= 0.8;
+	}
+	*/
+}
+
+async function updateCPU() {
+	for (let i = 0; i < steps; i++) {
+		await step()
+		counter++;
+	}
+
+	drawCPU()
+
+	s = 0
+	particles.forEach(function(p) {
+		s += Math.sqrt(p[2]*p[2] + p[3]*p[3])
+	})
+
+	document.getElementById('speed').innerHTML = s/n;
+	document.getElementById('counter').innerHTML = counter;
+
+	window.requestAnimationFrame(updateCPU)
+}
+
+function drawCPU() {
+	ctx.clearRect(0, 0, width, height)
+
+	ctx.fillStyle = '#000'
+	for (let i = 0; i < n; i++) {
+		ctx.fillRect(width/2 + (particles[i][0])*300, height/2 + (particles[i][1])*300, particleSize, particleSize)
+	}
+}
+
+async function drawGPU(pos) {
+	let pars = await pos.toArray(); 
+
+	ctx.clearRect(0, 0, width, height)
+
+	ctx.fillStyle = '#000'
+	for (let i = 0; i < n; i++) {
+		ctx.fillRect(width/2 + (pars[i*2+0])*300, height/2 + (pars[i*2+1])*300, particleSize, particleSize)
+	}
+}
+
+reset()
+window.requestAnimationFrame(updateCPU)
+
+
+
+
+
+
+
+
+
+
+</script>
+
+</body>
+
+</html>
